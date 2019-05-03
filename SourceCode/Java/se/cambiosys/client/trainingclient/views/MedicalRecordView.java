@@ -1,6 +1,7 @@
 package se.cambiosys.client.trainingclient.views;
 
-import se.cambio.contact.Contact;
+import se.cambio.platform.cc.hcm.contact.dto.ContactDTO;
+import se.cambio.platform.cc.hcm.contact.dto.impl.ContactDTOImpl;
 import se.cambiosys.client.framework.DefaultExceptionHandler;
 import se.cambiosys.client.framework.Framework;
 import se.cambiosys.client.framework.components.CambioButton;
@@ -15,28 +16,44 @@ import se.cambiosys.client.framework.components.CambioSelectionComboBox;
 import se.cambiosys.client.framework.components.CambioTable;
 import se.cambiosys.client.framework.components.CambioTextArea;
 import se.cambiosys.client.framework.components.CambioTimeChooser;
+import se.cambiosys.client.framework.settings.SettingHandler;
 import se.cambiosys.client.framework.settings.SettingHandlerService;
 import se.cambiosys.client.framework.subjectofcare.SubjectOfCareToolkit;
 import se.cambiosys.client.framework.subjectofcare.SubjectOfCareWrapper;
 import se.cambiosys.client.framework.units.gui.UnitSelectionComponent;
+import se.cambiosys.client.healthcaremodel.HCMSettingHandler;
+import se.cambiosys.client.healthcaremodel.contact.ContactDataProvider;
+import se.cambiosys.client.healthcaremodel.contact.gui.ContactStatusSelectionEditor;
+import se.cambiosys.client.infoclass.ActionWrapper;
 import se.cambiosys.client.resourceplanning.component.CareProviderSelectionComboBox;
 import se.cambiosys.client.trainingclient.models.MedicalRecord;
 import se.cambiosys.client.trainingclient.models.MedicalRecordModel;
 import se.cambiosys.client.healthcaremodel.contact.gui.ContactSelectionComponent;
 import se.cambiosys.client.trainingclient.settings.SettingFacade;
 import se.cambiosys.spider.DataService.MultiValuedData;
+import se.cambiosys.spider.HealthCareModel.ContactData;
+import se.cambiosys.spider.HealthCareModel.ContactFilter;
 import se.cambiosys.spider.PatientService.PatientData;
+import se.cambio.platform.cc.hcm.contact.Contact;
+
 
 import javax.swing.BorderFactory;
 import javax.swing.ComboBoxModel;
+import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.JTree;
+import javax.swing.event.AncestorEvent;
+import javax.swing.event.AncestorListener;
 import javax.swing.event.ListDataListener;
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeModel;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,6 +63,10 @@ public class MedicalRecordView  extends CambioInternalFrame
   private static MedicalRecordView medicalRecordView = null;
 
   private ContactSelectionComponent contactSelectionComponent;
+  private CambioSelectionComboBox unitSelection;
+  private ContactData[] currentContactData;
+  private DefaultMutableTreeNode root = new DefaultMutableTreeNode("AllContacts");
+
 
   private MedicalRecordView()
   {
@@ -104,12 +125,12 @@ public class MedicalRecordView  extends CambioInternalFrame
      unitList.add("unit1");
      unitList.add("unit2");
      CambioComboBox unitComboBox = new CambioComboBox(unitList.toArray());
-     CambioSelectionComboBox unitSelection = new CambioSelectionComboBox(SettingHandlerService.UNIT_SELECTION_FOR_WORKING_UNIT);
+     unitSelection = new CambioSelectionComboBox(SettingHandlerService.UNIT_SELECTION_FOR_WORKING_UNIT);
      unitSelection.loadSelection();
      unitSelection.setPreferredSize(new Dimension(150,20));
      UnitSelectionComponent unitSelectionComponent = new UnitSelectionComponent();
 
-     DefaultMutableTreeNode root = new DefaultMutableTreeNode("Root");
+     root = new DefaultMutableTreeNode("AllContacts");
      DefaultMutableTreeNode sub1= new DefaultMutableTreeNode("sub1");
      DefaultMutableTreeNode sub2 = new DefaultMutableTreeNode("sub2");
      DefaultMutableTreeNode sub3 = new DefaultMutableTreeNode("sub2");
@@ -126,7 +147,7 @@ public class MedicalRecordView  extends CambioInternalFrame
 
      unitPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
      unitPanel.setLayout(new GridBagLayout());
-     unitPanel.setPreferredSize(new Dimension(200,800));
+     //unitPanel.setPreferredSize(new Dimension(200,800));
 
      GridBagConstraints gbc = new GridBagConstraints();
      gbc.fill = GridBagConstraints.HORIZONTAL;
@@ -158,8 +179,60 @@ public class MedicalRecordView  extends CambioInternalFrame
      gbc.weighty = 1;
      gbc.gridwidth = 2;
      gbc.anchor = GridBagConstraints.NORTH;
-     gbc.fill = GridBagConstraints.HORIZONTAL;
+     gbc.fill = GridBagConstraints.BOTH;
      unitPanel.add(unitScrollPane, gbc);
+
+     unitSelection.addActionListener(new ActionListener()
+     {
+       @Override public void actionPerformed(ActionEvent e)
+       {
+         JFrame f = new JFrame();
+         JOptionPane.showMessageDialog(f, unitSelection.getSelectedId());
+         ContactData data = contactSelectionComponent.getSelectedContactData();
+         contactSelectionComponent.setSelectedCareUnit(unitSelection.getSelectedId());
+
+         try
+         {
+           String[] settingPath =
+             new String[] { "ContactStatusSetting", "AllowNewContactChoice", "UseSelectionForContactSearch",
+                            "SuggestContact", "UseInfoClass", "MandatoryConnectionToCareContact" };
+           MultiValuedData[] filterdata =
+             SettingHandler.getInstance().getSettingValues(HCMSettingHandler.PARENT_PATH, settingPath);
+           String statusValue = filterdata[0].stringValue;
+           ContactFilter m_filter = ContactStatusSelectionEditor.getContactFilter(statusValue);
+
+           String[] perfUnitValues = null;
+           String[] respUnitValues = null;
+
+           currentContactData = ContactDataProvider.readContacts(Framework.getInstance().getActiveSubjectOfCare().id, m_filter, perfUnitValues, respUnitValues);
+           List<ContactData> selectedContacts = new ArrayList<ContactData>();
+
+           for(int i = 0 ; i < currentContactData.length ; i++)
+           {
+             if(currentContactData[i].staffed.performingUnit.equals(unitSelection.getSelectedId()))
+             {
+               selectedContacts.add((ContactData)currentContactData[i]);
+             }
+           }
+
+           root.removeAllChildren();
+
+           for(int i = 0 ; i < selectedContacts.size() ; i++)
+           {
+             String contactAsStringDtl = ContactDataProvider.getStringForContact(selectedContacts.get(i), HCMSettingHandler.getContactPresentationSettingValue());
+             DefaultMutableTreeNode node = new DefaultMutableTreeNode(contactAsStringDtl);
+             root.add(node);
+           }
+
+           ((DefaultTreeModel)tree.getModel()).reload();
+
+         }
+         catch (Exception ex){
+           DefaultExceptionHandler.getInstance().handleThrowable(ex);
+         }
+       }
+
+     });
 
      return unitPanel;
 
@@ -399,6 +472,10 @@ public class MedicalRecordView  extends CambioInternalFrame
     String[] units = { "unit1", "unit2", "unit3", "unit4", "unit5" };
     CambioComboBox unitComboBox = new CambioComboBox(units);
 
+    CambioSelectionComboBox unitSelection = new CambioSelectionComboBox(SettingHandlerService.UNIT_SELECTION_FOR_WORKING_UNIT);
+    unitSelection.loadSelection();
+    unitSelection.setPreferredSize(new Dimension(150,20));
+
     String[] careProviders = { "DR.Nimal", "Anna", "Nurse"};
     CambioComboBox careProviderComboBox = new CambioComboBox(careProviders);
     CareProviderSelectionComboBox careProviderSelectionComboBox = new CareProviderSelectionComboBox();
@@ -449,7 +526,7 @@ public class MedicalRecordView  extends CambioInternalFrame
     gbc.gridx = 1;
     gbc.gridy = 2;
 
-    notePicker.add(unitComboBox,gbc);
+    notePicker.add(unitSelection,gbc);
 
     gbc.gridwidth = 1;
     gbc.gridx = 0;
@@ -558,6 +635,16 @@ public class MedicalRecordView  extends CambioInternalFrame
 
     notePanel.add( buttonPanel , c );
 
+
+    contactSelectionComponent.addActionListener(new ActionListener()
+    {
+      @Override public void actionPerformed(ActionEvent e)
+      {
+         ContactData contactData = contactSelectionComponent.getSelectedContactData();
+      }
+
+    });
+
     return notePanel;
   }
 
@@ -577,10 +664,11 @@ public class MedicalRecordView  extends CambioInternalFrame
 
     gbc.gridx = 0;
     gbc.gridy = i;
-    gbc.weightx = 1;
+    gbc.weightx = 0;
     gbc.gridwidth = 1;
 
     CambioPanel unitPanel = this.createUnitPanel();
+    unitPanel.setPreferredSize(new Dimension(200,800));
     mainPanel.add(unitPanel,gbc);
 
 
@@ -788,6 +876,7 @@ public class MedicalRecordView  extends CambioInternalFrame
     contactSelectionComponent.setPatientID(Framework.getInstance().getActiveSubjectOfCare().id);
     contactSelectionComponent.setAllowUnitAddMoreOptions(true);
     contactSelectionComponent.readContacts();
+
   }
 
   public void clearContactData()
